@@ -283,7 +283,8 @@ class HTTPConnectionPool(object):
 
         except (SocketTimeout, Empty), e:
             # Timed out either by socket or queue
-            raise TimeoutError("Request timed out after %f seconds" % self.timeout)
+            log.warn("Request timed out after %f seconds" % self.timeout)
+            return self.urlopen(method, url, body, headers, retries-1, redirect) # Try again
 
         except (ssl.SSLError), e:
             # SSL certificate error
