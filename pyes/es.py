@@ -1462,6 +1462,8 @@ class ResultSet(object):
                 #bad hack, should be not hits on the last iteration
                 self._results['hits']['hits'] = []
 
+        assert not self._results['timed_out'], "search timed out"
+        assert self._results['_shards']['failed'] == 0, "at least one shard failed"
 
         if process_post_query:
             self._facets = self._results.get('facets', {})
