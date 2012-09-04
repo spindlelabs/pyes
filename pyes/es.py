@@ -1464,7 +1464,7 @@ class ResultSet(object):
 
         assert not self._results['timed_out'], "search timed out"
         # src/main/java/org/elasticsearch/rest/action/support/RestActions.java
-        assert self._results['_shards']['failed'] == 0, "at least one shard failed (%s)" % self._results['_shards']['failures']
+        assert self._results['_shards']['failed'] == 0, "at least one shard failed (%s)" % self._results['_shards']
 
         if process_post_query:
             self._facets = self._results.get('facets', {})
