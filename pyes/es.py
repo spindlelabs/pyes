@@ -219,7 +219,7 @@ class ES(object):
                  dump_curl=False,
                  model=ElasticSearchModel,
                  raise_on_bulk_item_failure=False,
-                 max_non_scroll_search_attempts=6,
+                 max_non_scroll_search_attempts=1,
                  shard_failure_retry_sleep_seconds=30):
         """
         Init a es object.
