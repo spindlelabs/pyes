@@ -1204,13 +1204,16 @@ class ES(object):
 
         return self._query_call("_search", body, indices, doc_types, **query_params)
 
-    def search(self, query, indices=None, doc_types=None, **query_params):
+    def search(self, query, indices=None, doc_types=None,
+               max_non_scroll_search_attempts=6,
+               shard_failure_retry_sleep_seconds=30,
+               **query_params):
         """Execute a search against one or more indices to get the resultset.
-
         `query` must be a Search object, a Query object, or a custom
         dictionary of search parameters using the query DSL to be passed
         directly.
-
+        max_non_scroll_search_attempts: maximum number of attempts at a non-scroll search; used in case of shard failure. must be >= 1.
+        shard_failure_retry_sleep_seconds: in case of shard failure, number of seconds to sleep before retrying; must be non-negative.
         """
         indices = self._validate_indices(indices)
         if doc_types is None:
@@ -1224,7 +1227,9 @@ class ES(object):
             pass
         else:
             raise InvalidQuery("search() must be supplied with a Search or Query object, or a dict")
-        return ResultSet(connection=self, query=query, indices=indices, doc_types=doc_types, query_params=query_params)
+        return ResultSet(connection=self, query=query, indices=indices, doc_types=doc_types, query_params=query_params,
+                         max_non_scroll_search_attempts=max_non_scroll_search_attempts,
+                         shard_failure_retry_sleep_seconds=shard_failure_retry_sleep_seconds)
 
 #    scan method is no longer working due to change in ES.search behavior.  May no longer warrant its own method.
 #    def scan(self, query, indices=None, doc_types=None, scroll_timeout="10m", **query_params):
@@ -1393,13 +1398,19 @@ def encode_json(data):
 
 class ResultSet(object):
     def __init__(self, connection, query, indices=None, doc_types=None, query_params=None,
-                 auto_fix_keys=False, auto_clean_highlight=False):
+                 auto_fix_keys=False, auto_clean_highlight=False,
+                 max_non_scroll_search_attempts=1, shard_failure_retry_sleep_seconds=30):
         """
         results: an es query results dict
         fix_keys: remove the "_" from every key, useful for django views
         clean_highlight: removed empty highlight
+        max_non_scroll_search_attempts: maximum number of attempts at a non-scroll search; used in case of shard failure. must be >= 1.
+        shard_failure_retry_sleep_seconds: in case of shard failure, number of seconds to sleep before retrying; must be non-negative.
         query can be a dict or a Search object.
         """
+        assert max_non_scroll_search_attempts >= 1, "max_non_scroll_search_attempts is %d; must be >= 1" % max_non_scroll_search_attempts
+        assert shard_failure_retry_sleep_seconds >= 0, "shard_failure_retry_sleep_seconds is %d; must be >= 0" % shard_failure_retry_sleep_seconds
+
         self.connection = connection
         self.indices = indices
         self.doc_types = doc_types
@@ -1412,6 +1423,8 @@ class ResultSet(object):
         self._facets = {}
         self.auto_fix_keys = auto_fix_keys
         self.auto_clean_highlight = auto_clean_highlight
+        self._max_non_scroll_search_attempts = max_non_scroll_search_attempts
+        self._shard_failure_retry_sleep_seconds = shard_failure_retry_sleep_seconds
 
         from pyes.query import Search, Query
 
@@ -1437,8 +1450,28 @@ class ResultSet(object):
             self.query.start = self.start
             self.query.size = self.chuck_size
 
-            self._results = self.connection.search_raw(self.query, indices=self.indices,
-                                                       doc_types=self.doc_types, **self.query_params)
+            attempts = 0
+            while True:
+              attempts += 1
+              self._results = self.connection.search_raw(self.query, indices=self.indices,
+                                                         doc_types=self.doc_types, **self.query_params)
+              if 'scroll' in self.query_params:
+                # Don't retry scroll queries — even the initial query for a scroll query
+                break
+              if self._results['_shards']['failed'] == 0:
+                # No shard failures, so let's move on
+                break
+              if attempts < self._max_non_scroll_search_attempts:
+                # Sleep/retry to see if ES will recover
+                log.warn("ES shard failure on attempt %d; sleeping for %f secs and retrying",
+                         attempts,
+                         self._shard_failure_retry_sleep_seconds)
+                time.sleep(self._shard_failure_retry_sleep_seconds)
+              else:
+                log.error("Encountered maximum number (%d) of consecutive ES shard failures",
+                          self._max_non_scroll_search_attempts)
+                break
+
             if 'search_type' in self.query_params and self.query_params['search_type'] == "scan":
                 self.scroller_parameters['search_type'] = self.query_params['search_type']
                 del self.query_params['search_type']
