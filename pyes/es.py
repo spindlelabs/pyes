@@ -218,7 +218,9 @@ class ES(object):
                  default_types=None,
                  dump_curl=False,
                  model=ElasticSearchModel,
-                 raise_on_bulk_item_failure=False):
+                 raise_on_bulk_item_failure=False,
+                 max_non_scroll_search_attempts=6,
+                 shard_failure_retry_sleep_seconds=30):
         """
         Init a es object.
         Servers can be defined in different forms:
@@ -245,13 +247,22 @@ class ES(object):
         :param raise_on_bulk_item_failure: raises an exception if an item in a
         bulk operation fails
 
+        :param max_non_scroll_search_attempts: maximum number of attempts at
+         a non-scroll search; used in case of shard failure. must be >= 1.
+        :param shard_failure_retry_sleep_seconds: in case of shard failure,
+         number of seconds to sleep before retrying; must be non-negative.
         """
+        assert max_non_scroll_search_attempts >= 1, "max_non_scroll_search_attempts is %d; must be >= 1" % max_non_scroll_search_attempts
+        assert shard_failure_retry_sleep_seconds >= 0, "shard_failure_retry_sleep_seconds is %d; must be >= 0" % shard_failure_retry_sleep_seconds
+
         self.timeout = timeout
         self.max_retries = max_retries
         self.cluster = None
         self.debug_dump = False
         self.cluster_name = "undefined"
         self.connection = None
+        self._max_non_scroll_search_attempts = max_non_scroll_search_attempts
+        self._shard_failure_retry_sleep_seconds = shard_failure_retry_sleep_seconds
 
         if model is None:
             model = lambda connection, model: model
@@ -1204,16 +1215,11 @@ class ES(object):
 
         return self._query_call("_search", body, indices, doc_types, **query_params)
 
-    def search(self, query, indices=None, doc_types=None,
-               max_non_scroll_search_attempts=6,
-               shard_failure_retry_sleep_seconds=30,
-               **query_params):
+    def search(self, query, indices=None, doc_types=None, **query_params):
         """Execute a search against one or more indices to get the resultset.
         `query` must be a Search object, a Query object, or a custom
         dictionary of search parameters using the query DSL to be passed
         directly.
-        max_non_scroll_search_attempts: maximum number of attempts at a non-scroll search; used in case of shard failure. must be >= 1.
-        shard_failure_retry_sleep_seconds: in case of shard failure, number of seconds to sleep before retrying; must be non-negative.
         """
         indices = self._validate_indices(indices)
         if doc_types is None:
@@ -1228,8 +1234,8 @@ class ES(object):
         else:
             raise InvalidQuery("search() must be supplied with a Search or Query object, or a dict")
         return ResultSet(connection=self, query=query, indices=indices, doc_types=doc_types, query_params=query_params,
-                         max_non_scroll_search_attempts=max_non_scroll_search_attempts,
-                         shard_failure_retry_sleep_seconds=shard_failure_retry_sleep_seconds)
+                         max_non_scroll_search_attempts=self._max_non_scroll_search_attempts,
+                         shard_failure_retry_sleep_seconds=self._shard_failure_retry_sleep_seconds)
 
 #    scan method is no longer working due to change in ES.search behavior.  May no longer warrant its own method.
 #    def scan(self, query, indices=None, doc_types=None, scroll_timeout="10m", **query_params):
