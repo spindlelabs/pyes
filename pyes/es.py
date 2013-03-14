@@ -333,7 +333,8 @@ class ES(object):
             except ValueError:
                 raise RuntimeError("Invalid port: \"%s\"" % port)
             if _type is None:
-                if 9200 <= port <= 9299:
+                # LSI-217: it's always http
+                if 7000 <= port <= 9299:
                     _type = "http"
                 elif 9500 <= port <= 9599:
                     _type = "thrift"
