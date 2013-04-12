@@ -930,7 +930,7 @@ class TextQuery(Query):
             query["slop"] = slop
         if fuzziness is not None:
             query["fuzziness"] = fuzziness
-        if slop != 0:
+        if prefix_length != 0:
             query["prefix_length"] = prefix_length
         if max_expansions != 2147483647:
             query["max_expansions"] = max_expansions
